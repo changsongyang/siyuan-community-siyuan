@@ -23,7 +23,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/siyuan-community/siyuan/kernel/model"
 	"github.com/siyuan-community/siyuan/kernel/util"
-	"github.com/siyuan-note/logging"
 )
 
 func getRecentDocs(c *gin.Context) {
