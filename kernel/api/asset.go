@@ -394,8 +394,13 @@ func uploadCloud(c *gin.Context) {
 		return
 	}
 
+	ignorePushMsg := false
+	if nil != arg["ignorePushMsg"] {
+		ignorePushMsg = arg["ignorePushMsg"].(bool)
+	}
+
 	id := arg["id"].(string)
-	count, err := model.UploadAssets2Cloud(id)
+	count, err := model.UploadAssets2Cloud(id, ignorePushMsg)
 	if err != nil {
 		ret.Code = -1
 		ret.Msg = err.Error()
@@ -427,7 +432,12 @@ func uploadCloudByAssetsPaths(c *gin.Context) {
 		assets = append(assets, pathArg.(string))
 	}
 
-	count, err := model.UploadAssets2CloudByAssetsPaths(assets)
+	ignorePushMsg := false
+	if nil != arg["ignorePushMsg"] {
+		ignorePushMsg = arg["ignorePushMsg"].(bool)
+	}
+
+	count, err := model.UploadAssets2CloudByAssetsPaths(assets, ignorePushMsg)
 	if err != nil {
 		ret.Code = -1
 		ret.Msg = err.Error()
@@ -435,7 +445,9 @@ func uploadCloudByAssetsPaths(c *gin.Context) {
 		return
 	}
 
-	util.PushMsg(fmt.Sprintf(model.Conf.Language(41), count), 3000)
+	if !ignorePushMsg {
+		util.PushMsg(fmt.Sprintf(model.Conf.Language(41), count), 3000)
+	}
 }
 
 func insertLocalAssets(c *gin.Context) {

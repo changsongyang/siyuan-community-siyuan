@@ -665,6 +665,10 @@ func getBlockInfo(c *gin.Context) {
 		ret.Code = -1
 		ret.Msg = model.Conf.Language(275)
 		return
+	} else if errors.Is(err, model.ErrBoxUnindexed) {
+		ret.Code = -1
+		ret.Msg = "" // 加载的时候已经推送过提示了，这里不需要再提示
+		return
 	}
 
 	block, _ := model.GetBlock(id, tree)
@@ -811,6 +815,42 @@ func getBlockKramdown(c *gin.Context) {
 		"id":       id,
 		"kramdown": kramdown,
 	}
+}
+
+func getBlockKramdowns(c *gin.Context) {
+	ret := gulu.Ret.NewResult()
+	defer c.JSON(http.StatusOK, ret)
+
+	arg, ok := util.JsonArg(c, ret)
+	if !ok {
+		return
+	}
+
+	idsArg := arg["ids"].([]interface{})
+	var ids []string
+	for _, id := range idsArg {
+		idStr := id.(string)
+		// 验证 ID 格式，跳过无效的 ID
+		if !util.InvalidIDPattern(idStr, nil) {
+			ids = append(ids, idStr)
+		}
+	}
+
+	// md：Markdown 标记符模式，使用标记符导出
+	// textmark：文本标记模式，使用 span 标签导出
+	// https://github.com/siyuan-note/siyuan/issues/13183
+	mode := "md"
+	if modeArg := arg["mode"]; nil != modeArg {
+		mode = modeArg.(string)
+		if "md" != mode && "textmark" != mode {
+			ret.Code = -1
+			ret.Msg = "Invalid mode"
+			return
+		}
+	}
+
+	kramdowns := model.GetBlockKramdowns(ids, mode)
+	ret.Data = kramdowns
 }
 
 func getChildBlocks(c *gin.Context) {

@@ -66,7 +66,7 @@ import {openGlobalSearch} from "../../search/util";
 import {popSearch} from "../../mobile/menu/search";
 /// #endif
 import {BlockPanel} from "../../block/Panel";
-import {copyPlainText, isInIOS, isMac, isOnlyMeta, readClipboard, encodeBase64} from "../util/compatibility";
+import {copyPlainText, encodeBase64, isInIOS, isMac, isOnlyMeta, readClipboard} from "../util/compatibility";
 import {MenuItem} from "../../menus/Menu";
 import {fetchPost, fetchSyncPost} from "../../util/fetch";
 import {onGet} from "../util/onGet";
@@ -102,6 +102,7 @@ import {openGalleryItemMenu} from "../render/av/gallery/util";
 import {clearSelect} from "../util/clear";
 import {chartRender} from "../render/chartRender";
 import {updateCalloutType} from "./callout";
+import {nbsp2space, removeZWJ} from "../util/normalizeText";
 
 export class WYSIWYG {
     public lastHTMLs: { [key: string]: string } = {};
@@ -380,29 +381,27 @@ export class WYSIWYG {
                     html = html.substring(0, html.length - 1) + "]";
                 }
             } else if (selectTableElement) {
-                const selectCellElements: HTMLTableCellElement[] = [];
                 const scrollLeft = nodeElement.firstElementChild.scrollLeft;
                 const scrollTop = nodeElement.querySelector("table").scrollTop;
                 const tableSelectElement = nodeElement.querySelector(".table__select") as HTMLElement;
                 html = "<table>";
-                nodeElement.querySelectorAll("th, td").forEach((item: HTMLTableCellElement) => {
-                    if (!item.classList.contains("fn__none") && isIncludeCell({
-                        tableSelectElement,
-                        scrollLeft,
-                        scrollTop,
-                        item,
-                    })) {
-                        selectCellElements.push(item);
-                    }
-                });
-                selectCellElements.forEach((item, index) => {
-                    if (index === 0 || !item.previousElementSibling ||
-                        item.previousElementSibling !== selectCellElements[index - 1]) {
+                nodeElement.querySelectorAll("tr").forEach(rowElement => {
+                    const rowCells: HTMLTableCellElement[] = [];
+                    rowElement.querySelectorAll("th, td").forEach((item: HTMLTableCellElement) => {
+                        if (!item.classList.contains("fn__none") && isIncludeCell({
+                            tableSelectElement,
+                            scrollLeft,
+                            scrollTop,
+                            item,
+                        })) {
+                            rowCells.push(item);
+                        }
+                    });
+                    if (rowCells.length > 0) {
                         html += "<tr>";
-                    }
-                    html += item.outerHTML;
-                    if (!item.nextElementSibling || !selectCellElements[index + 1] ||
-                        item.nextElementSibling !== selectCellElements[index + 1]) {
+                        rowCells.forEach(cell => {
+                            html += cell.outerHTML;
+                        });
                         html += "</tr>";
                     }
                 });
@@ -482,7 +481,7 @@ export class WYSIWYG {
                 html = getEnableHTML(html);
             }
             textPlain = textPlain || protyle.lute.BlockDOM2StdMd(html).trimEnd();
-            textPlain = textPlain.replace(/\u00A0/g, " ") // Replace non-breaking spaces with normal spaces when copying https://github.com/siyuan-note/siyuan/issues/9382
+            textPlain = removeZWJ(nbsp2space(textPlain)) // Replace non-breaking spaces with normal spaces when copying https://github.com/siyuan-note/siyuan/issues/9382
                 // Remove ZWSP when copying inline elements https://github.com/siyuan-note/siyuan/issues/13882
                 .replace(new RegExp(Constants.ZWSP, "g"), "");
             event.clipboardData.setData("text/plain", textPlain);
@@ -493,7 +492,7 @@ export class WYSIWYG {
                 event.clipboardData.setData("text/siyuan", textSiyuan);
                 restoreLuteMarkdownSyntax(protyle);
                 // 在 text/html 中插入注释节点，用于右键菜单粘贴时获取 text/siyuan 数据
-                const textHTML = `<!--data-siyuan='${encodeBase64(textSiyuan)}'-->` + (selectTableElement ? html : protyle.lute.BlockDOM2HTML(selectAVElement ? textPlain : html));
+                const textHTML = `<!--data-siyuan='${encodeBase64(textSiyuan)}'-->` + removeZWJ(selectTableElement ? html : protyle.lute.BlockDOM2HTML(selectAVElement ? textPlain : html));
                 event.clipboardData.setData("text/html", textHTML);
                 if (needClipboardWrite) {
                     try {
@@ -789,10 +788,14 @@ export class WYSIWYG {
                 if (!nodeElement) {
                     return;
                 }
+                const bodyElement = hasClosestByClassName(avDragFillElement, "av__body") as HTMLElement;
+                if (!bodyElement) {
+                    return;
+                }
                 const originData: { [key: string]: IAVCellValue[] } = {};
                 let lastOriginCellElement: HTMLElement;
                 const originCellIds: string[] = [];
-                nodeElement.querySelectorAll(".av__cell--active").forEach((item: HTMLElement) => {
+                bodyElement.querySelectorAll(".av__cell--active").forEach((item: HTMLElement) => {
                     const rowElement = hasClosestByClassName(item, "av__row");
                     if (rowElement) {
                         if (!originData[rowElement.dataset.id]) {
@@ -804,7 +807,7 @@ export class WYSIWYG {
                     }
                 });
                 const dragFillCellIndex = getPositionByCellElement(lastOriginCellElement);
-                const firstCellIndex = getPositionByCellElement(nodeElement.querySelector(".av__cell--active"));
+                const firstCellIndex = getPositionByCellElement(bodyElement.querySelector(".av__cell--active"));
                 let moveAVCellElement: HTMLElement;
                 let lastCellElement: HTMLElement;
                 documentSelf.onmousemove = (moveEvent: MouseEvent) => {
@@ -815,7 +818,7 @@ export class WYSIWYG {
                     moveAVCellElement = tempCellElement;
                     if (moveAVCellElement && moveAVCellElement.dataset.id) {
                         const newIndex = getPositionByCellElement(moveAVCellElement);
-                        nodeElement.querySelectorAll(".av__cell--active").forEach((item: HTMLElement) => {
+                        bodyElement.querySelectorAll(".av__cell--active").forEach((item: HTMLElement) => {
                             if (!originCellIds.includes(item.dataset.id)) {
                                 item.classList.remove("av__cell--active");
                             }
@@ -824,7 +827,7 @@ export class WYSIWYG {
                             lastCellElement = undefined;
                             return;
                         }
-                        nodeElement.querySelectorAll(".av__row").forEach((rowElement: HTMLElement, index: number) => {
+                        bodyElement.querySelectorAll(".av__row").forEach((rowElement: HTMLElement, index: number) => {
                             if ((newIndex.rowIndex < firstCellIndex.rowIndex && index >= newIndex.rowIndex && index < firstCellIndex.rowIndex) ||
                                 (newIndex.rowIndex > dragFillCellIndex.rowIndex && index <= newIndex.rowIndex && index > dragFillCellIndex.rowIndex)) {
                                 rowElement.querySelectorAll(".av__cell").forEach((cellElement: HTMLElement, cellIndex: number) => {
@@ -846,7 +849,7 @@ export class WYSIWYG {
                     documentSelf.onselect = null;
                     if (lastCellElement) {
                         dragFillCellsValue(protyle, nodeElement, originData, originCellIds, lastOriginCellElement);
-                        const allActiveCellsElement = nodeElement.querySelectorAll(".av__cell--active");
+                        const allActiveCellsElement = bodyElement.querySelectorAll(".av__cell--active");
                         addDragFill(allActiveCellsElement[allActiveCellsElement.length - 1]);
                     }
                     return false;
@@ -1095,79 +1098,84 @@ export class WYSIWYG {
             documentSelf.onmousemove = (moveEvent: MouseEvent) => {
                 let moveTarget: boolean | HTMLElement = moveEvent.target as HTMLElement;
                 // table cell select
-                if (tableBlockElement && tableBlockElement.contains(moveTarget) &&
+                if (tableBlockElement &&
                     !hasClosestByClassName(tableBlockElement, "protyle-wysiwyg__embed")) {
-                    if (moveTarget.classList.contains("table__select")) {
-                        moveTarget.classList.add("fn__none");
-                        const pointElement = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
-                        moveTarget.classList.remove("fn__none");
-                        moveTarget = hasClosestByTag(pointElement, "TH") || hasClosestByTag(pointElement, "TD");
-                    }
-                    if (moveTarget && moveTarget === target) {
-                        tableBlockElement.querySelector(".table__select").removeAttribute("style");
-                        protyle.wysiwyg.element.classList.remove("protyle-wysiwyg--hiderange");
-                        moveCellElement = moveTarget;
-                        return false;
-                    }
-                    if (moveTarget && (moveTarget.tagName === "TH" || moveTarget.tagName === "TD") &&
-                        (!moveCellElement || moveCellElement !== moveTarget)) {
-                        // @ts-ignore
-                        tableBlockElement.firstElementChild.style.webkitUserModify = "read-only";
-                        let width = target.offsetLeft + target.clientWidth - moveTarget.offsetLeft;
-                        let left = moveTarget.offsetLeft;
-                        if (target.offsetLeft === moveTarget.offsetLeft) {
-                            width = Math.max(target.clientWidth, moveTarget.clientWidth);
-                        } else if (target.offsetLeft < moveTarget.offsetLeft) {
-                            width = moveTarget.offsetLeft + moveTarget.clientWidth - target.offsetLeft;
-                            left = target.offsetLeft;
+                    if (tableBlockElement.contains(moveTarget)) {
+                        if (moveTarget.classList.contains("table__select")) {
+                            moveTarget.classList.add("fn__none");
+                            const pointElement = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
+                            moveTarget.classList.remove("fn__none");
+                            moveTarget = hasClosestByTag(pointElement, "TH") || hasClosestByTag(pointElement, "TD");
                         }
-                        let height = target.offsetTop + target.clientHeight - moveTarget.offsetTop;
-                        let top = moveTarget.offsetTop;
-                        if (target.offsetTop === moveTarget.offsetTop) {
-                            height = Math.max(target.clientHeight, moveTarget.clientHeight);
-                        } else if (target.offsetTop < moveTarget.offsetTop) {
-                            height = moveTarget.offsetTop + moveTarget.clientHeight - target.offsetTop;
-                            top = target.offsetTop;
+                        if (moveTarget && moveTarget === target) {
+                            tableBlockElement.querySelector(".table__select").removeAttribute("style");
+                            protyle.wysiwyg.element.classList.remove("protyle-wysiwyg--hiderange");
+                            moveCellElement = moveTarget;
+                            return false;
                         }
-                        // https://github.com/siyuan-note/insider/issues/1015
-                        Array.from(tableBlockElement.querySelectorAll("th, td")).find((item: HTMLElement) => {
-                            const updateWidth = item.offsetLeft < left + width && item.offsetLeft + item.clientWidth > left + width;
-                            const updateWidth2 = item.offsetLeft < left && item.offsetLeft + item.clientWidth > left;
-                            if (item.offsetTop < top && item.offsetTop + item.clientHeight > top) {
-                                if ((item.offsetLeft + 6 > left && item.offsetLeft + item.clientWidth - 6 < left + width) || updateWidth || updateWidth2) {
-                                    height = top + height - item.offsetTop;
-                                    top = item.offsetTop;
-                                }
-                                if (updateWidth) {
-                                    width = item.offsetLeft + item.clientWidth - left;
-                                }
-                                if (updateWidth2) {
-                                    width = left + width - item.offsetLeft;
-                                    left = item.offsetLeft;
-                                }
-                            } else if (item.offsetTop < top + height && item.offsetTop + item.clientHeight > top + height) {
-                                if ((item.offsetLeft + 6 > left && item.offsetLeft + item.clientWidth - 6 < left + width) || updateWidth || updateWidth2) {
-                                    height = item.clientHeight + item.offsetTop - top;
-                                }
-                                if (updateWidth) {
-                                    width = item.offsetLeft + item.clientWidth - left;
-                                }
-                                if (updateWidth2) {
-                                    width = left + width - item.offsetLeft;
-                                    left = item.offsetLeft;
-                                }
-                            } else if (updateWidth2 && item.offsetTop + 6 > top && item.offsetTop + item.clientHeight - 6 < top + height) {
-                                width = left + width - item.offsetLeft;
-                                left = item.offsetLeft;
-                            } else if (updateWidth && item.offsetTop + 6 > top && item.offsetTop + item.clientHeight - 6 < top + height) {
-                                width = item.offsetLeft + item.clientWidth - left;
+                        if (moveTarget && (moveTarget.tagName === "TH" || moveTarget.tagName === "TD") &&
+                            (!moveCellElement || moveCellElement !== moveTarget)) {
+                            // @ts-ignore
+                            tableBlockElement.firstElementChild.style.webkitUserModify = "read-only";
+                            let width = target.offsetLeft + target.clientWidth - moveTarget.offsetLeft;
+                            let left = moveTarget.offsetLeft;
+                            if (target.offsetLeft === moveTarget.offsetLeft) {
+                                width = Math.max(target.clientWidth, moveTarget.clientWidth);
+                            } else if (target.offsetLeft < moveTarget.offsetLeft) {
+                                width = moveTarget.offsetLeft + moveTarget.clientWidth - target.offsetLeft;
+                                left = target.offsetLeft;
                             }
-                        });
-                        protyle.wysiwyg.element.classList.add("protyle-wysiwyg--hiderange");
-                        tableBlockElement.querySelector(".table__select").setAttribute("style", `left:${left - tableBlockElement.firstElementChild.scrollLeft}px;top:${top - tableBlockElement.querySelector("table").scrollTop}px;height:${height}px;width:${width + 1}px;`);
-                        moveCellElement = moveTarget;
+                            let height = target.offsetTop + target.clientHeight - moveTarget.offsetTop;
+                            let top = moveTarget.offsetTop;
+                            if (target.offsetTop === moveTarget.offsetTop) {
+                                height = Math.max(target.clientHeight, moveTarget.clientHeight);
+                            } else if (target.offsetTop < moveTarget.offsetTop) {
+                                height = moveTarget.offsetTop + moveTarget.clientHeight - target.offsetTop;
+                                top = target.offsetTop;
+                            }
+                            // https://github.com/siyuan-note/insider/issues/1015
+                            Array.from(tableBlockElement.querySelectorAll("th, td")).find((item: HTMLElement) => {
+                                const updateWidth = item.offsetLeft < left + width && item.offsetLeft + item.clientWidth > left + width;
+                                const updateWidth2 = item.offsetLeft < left && item.offsetLeft + item.clientWidth > left;
+                                if (item.offsetTop < top && item.offsetTop + item.clientHeight > top) {
+                                    if ((item.offsetLeft + 6 > left && item.offsetLeft + item.clientWidth - 6 < left + width) || updateWidth || updateWidth2) {
+                                        height = top + height - item.offsetTop;
+                                        top = item.offsetTop;
+                                    }
+                                    if (updateWidth) {
+                                        width = item.offsetLeft + item.clientWidth - left;
+                                    }
+                                    if (updateWidth2) {
+                                        width = left + width - item.offsetLeft;
+                                        left = item.offsetLeft;
+                                    }
+                                } else if (item.offsetTop < top + height && item.offsetTop + item.clientHeight > top + height) {
+                                    if ((item.offsetLeft + 6 > left && item.offsetLeft + item.clientWidth - 6 < left + width) || updateWidth || updateWidth2) {
+                                        height = item.clientHeight + item.offsetTop - top;
+                                    }
+                                    if (updateWidth) {
+                                        width = item.offsetLeft + item.clientWidth - left;
+                                    }
+                                    if (updateWidth2) {
+                                        width = left + width - item.offsetLeft;
+                                        left = item.offsetLeft;
+                                    }
+                                } else if (updateWidth2 && item.offsetTop + 6 > top && item.offsetTop + item.clientHeight - 6 < top + height) {
+                                    width = left + width - item.offsetLeft;
+                                    left = item.offsetLeft;
+                                } else if (updateWidth && item.offsetTop + 6 > top && item.offsetTop + item.clientHeight - 6 < top + height) {
+                                    width = item.offsetLeft + item.clientWidth - left;
+                                }
+                            });
+                            protyle.wysiwyg.element.classList.add("protyle-wysiwyg--hiderange");
+                            tableBlockElement.querySelector(".table__select").setAttribute("style", `left:${left - tableBlockElement.firstElementChild.scrollLeft}px;top:${top - tableBlockElement.querySelector("table").scrollTop}px;height:${height}px;width:${width + 1}px;`);
+                            moveCellElement = moveTarget;
+                        }
+                        return;
+                    } else {
+                        tableBlockElement.querySelector(".table__select").removeAttribute("style");
+                        moveCellElement = undefined;
                     }
-                    return;
                 }
                 // 在包含 img， video， audio 的元素上划选后无法上下滚动 https://ld246.com/article/1681778773806
                 // 在包含 img， video， audio 的元素上拖拽无法划选 https://github.com/siyuan-note/siyuan/issues/11763
@@ -2066,7 +2074,7 @@ export class WYSIWYG {
                     textPlain = textPlain.endsWith("\n") ? textPlain.replace(/\n$/, "") : textPlain;
                 }
             }
-            textPlain = textPlain.replace(/\u00A0/g, " "); // Replace non-breaking spaces with normal spaces when copying https://github.com/siyuan-note/siyuan/issues/9382
+            textPlain = removeZWJ(nbsp2space(textPlain)); // Replace non-breaking spaces with normal spaces when copying https://github.com/siyuan-note/siyuan/issues/9382
             event.clipboardData.setData("text/plain", textPlain);
 
             if (!isInCodeBlock) {
@@ -2075,7 +2083,7 @@ export class WYSIWYG {
                 restoreLuteMarkdownSyntax(protyle);
                 event.clipboardData.setData("text/siyuan", textSiyuan);
                 // 在 text/html 中插入注释节点，用于右键菜单粘贴时获取 text/siyuan 数据
-                const textHTML = `<!--data-siyuan='${encodeBase64(textSiyuan)}'-->` + (selectTableElement ? html : protyle.lute.BlockDOM2HTML(selectAVElement ? textPlain : html));
+                const textHTML = `<!--data-siyuan='${encodeBase64(textSiyuan)}'-->` + removeZWJ(selectTableElement ? html : protyle.lute.BlockDOM2HTML(selectAVElement ? textPlain : html));
                 event.clipboardData.setData("text/html", textHTML);
                 if (needClipboardWrite) {
                     try {
@@ -3045,7 +3053,7 @@ export class WYSIWYG {
 
             const calloutTitleElement = hasTopClosestByClassName(event.target, "callout-title");
             if (!protyle.disabled && !event.shiftKey && !ctrlIsPressed && calloutTitleElement) {
-                updateCalloutType(calloutTitleElement, protyle);
+                updateCalloutType([hasClosestBlock(calloutTitleElement) as HTMLElement], protyle);
                 event.preventDefault();
                 event.stopPropagation();
                 return;
@@ -3070,8 +3078,21 @@ export class WYSIWYG {
                         } else {
                             emojiHTML = unicode2Emoji(unicode);
                         }
+                        if (unicode === "") {
+                            const subType = nodeElement.getAttribute("data-subtype");
+                            if (subType === "NOTE") {
+                                emojiHTML = "✏️";
+                            } else if (subType === "TIP") {
+                                emojiHTML = "💡";
+                            } else if (subType === "IMPORTANT") {
+                                emojiHTML = "❗";
+                            } else if (subType === "WARNING") {
+                                emojiHTML = "⚠️";
+                            } else if (subType === "CAUTION") {
+                                emojiHTML = "🚨";
+                            }
+                        }
                         calloutIconElement.innerHTML = emojiHTML;
-                        hideElements(["dialog"]);
                         updateTransaction(protyle, nodeElement.getAttribute("data-node-id"), nodeElement.outerHTML, oldHTML);
                         focusBlock(nodeElement);
                     }, calloutIconElement.querySelector("img"));

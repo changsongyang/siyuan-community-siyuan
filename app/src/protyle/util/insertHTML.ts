@@ -349,7 +349,8 @@ export const insertHTML = (html: string, protyle: IProtyle, isBlock = false,
             // 选中 ref**bbb** 后 alt+[
             range.deleteContents();
             // https://github.com/siyuan-note/siyuan/issues/14035
-            if (range.startContainer.nodeType !== 3 && range.startContainer.textContent === "") {
+            if (range.startContainer.nodeType !== 3 && (range.startContainer as Element).tagName === "SPAN" &&
+                range.startContainer.textContent === "") {
                 // ref 选中处理 https://ld246.com/article/1629214377537
                 (range.startContainer as HTMLElement).remove();
             }
@@ -565,21 +566,19 @@ export const insertHTML = (html: string, protyle: IProtyle, isBlock = false,
         blockElement.getAttribute("fold") === "1" && !insertBefore) {
         fetchPost("/api/block/getHeadingChildrenIDs", {id: blockElement.getAttribute("data-node-id")}, (response) => {
             const childrenIDs: string[] = response.data;
-            if (childrenIDs.length > 0) {
-                const previousId = childrenIDs[childrenIDs.length - 1];
-                foldData = setFold(protyle, blockElement, true, false, false, true);
-                foldData.doOperations[0].context = {
-                    focusId: lastElement?.getAttribute("data-node-id"),
-                };
-                doOperation.forEach(item => {
-                    if (item.action === "insert") {
-                        item.previousID = previousId;
-                    }
-                });
-                doOperation.splice(0, 0, ...foldData.doOperations);
-                undoOperation.push(...foldData.undoOperations);
-                transaction(protyle, doOperation, undoOperation);
-            }
+            const previousId = (childrenIDs && childrenIDs.length > 0) ? childrenIDs[childrenIDs.length - 1] : blockElement.getAttribute("data-node-id");
+            foldData = setFold(protyle, blockElement, true, false, false, true);
+            foldData.doOperations[0].context = {
+                focusId: lastElement?.getAttribute("data-node-id"),
+            };
+            doOperation.forEach(item => {
+                if (item.action === "insert") {
+                    item.previousID = previousId;
+                }
+            });
+            doOperation.splice(0, 0, ...foldData.doOperations);
+            undoOperation.push(...foldData.undoOperations);
+            transaction(protyle, doOperation, undoOperation);
         });
         return;
     }

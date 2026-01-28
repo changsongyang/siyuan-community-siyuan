@@ -31,6 +31,14 @@ export const encodeBase64 = (text: string): string => {
 };
 
 export const getTextSiyuanFromTextHTML = (html: string) => {
+    if (html.trimStart().startsWith("<html") &&
+        html.substring(0, html.indexOf(">")).includes('xmlns:x="urn:schemas-microsoft-com:office:excel"')) {
+        // 移除 Microsoft Excel 中的 data-siyuan https://github.com/siyuan-note/siyuan/pull/16338
+        return {
+            textSiyuan: "",
+            textHtml: html.replace(/<!--data-siyuan='[^']+'-->/g, "")
+        };
+    }
     const siyuanMatch = html.match(/<!--data-siyuan='([^']+)'-->/);
     let textSiyuan = "";
     let textHtml = html;
@@ -45,7 +53,7 @@ export const getTextSiyuanFromTextHTML = (html: string) => {
                 textSiyuan = decoder.decode(bytes);
             }
             // 移除注释节点，保持原有的 text/html 内容
-            textHtml = html.replace(/<!--data-siyuan='[^']+'-->/, "");
+            textHtml = html.replace(/<!--data-siyuan='[^']+'-->/g, "");
         } catch (e) {
             console.log("Failed to decode siyuan data from HTML comment:", e);
         }
@@ -122,13 +130,13 @@ export const readText = () => {
 /// #if !BROWSER
 export const getLocalFiles = async () => {
     // 不再支持 PC 浏览器 https://github.com/siyuan-note/siyuan/issues/7206
-    let localFiles: string[] = [];
+    let localFiles: ILocalFiles[] = [];
     if ("darwin" === window.siyuan.config.system.os) {
         const xmlString = clipboard.read("NSFilenamesPboardType");
         const domParser = new DOMParser();
         const xmlDom = domParser.parseFromString(xmlString, "application/xml");
         Array.from(xmlDom.getElementsByTagName("string")).forEach(item => {
-            localFiles.push(item.childNodes[0].nodeValue);
+            localFiles.push({path: item.childNodes[0].nodeValue, size: null});
         });
     } else {
         const xmlString = await fetchSyncPost("/api/clipboard/readFilePaths", {});
@@ -444,7 +452,8 @@ export const getLocalStorage = (cb: () => void) => {
             removeAssets: true,
             keepFold: false,
             mergeSubdocs: false,
-            watermark: false
+            watermark: false,
+            paged: true
         };
         defaultStorage[Constants.LOCAL_EXPORTIMG] = {
             keepFold: false,
@@ -464,6 +473,7 @@ export const getLocalStorage = (cb: () => void) => {
         defaultStorage[Constants.LOCAL_FONTSTYLES] = [];
         defaultStorage[Constants.LOCAL_FILESPATHS] = [];    // IFilesPath[]
         defaultStorage[Constants.LOCAL_SEARCHDATA] = {
+            removed: true,
             page: 1,
             sort: 0,
             group: 0,

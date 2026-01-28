@@ -132,19 +132,22 @@ type Package struct {
 	PreviewURLThumb string `json:"previewURLThumb"`
 	IconURL         string `json:"iconURL"`
 
-	Installed    bool   `json:"installed"`
-	Outdated     bool   `json:"outdated"`
-	Current      bool   `json:"current"`
-	Updated      string `json:"updated"`
-	Stars        int    `json:"stars"`
-	OpenIssues   int    `json:"openIssues"`
-	Size         int64  `json:"size"`
-	HSize        string `json:"hSize"`
-	InstallSize  int64  `json:"installSize"`
-	HInstallSize string `json:"hInstallSize"`
-	HInstallDate string `json:"hInstallDate"`
-	HUpdated     string `json:"hUpdated"`
-	Downloads    int    `json:"downloads"`
+	Installed               bool   `json:"installed"`
+	Outdated                bool   `json:"outdated"`
+	Current                 bool   `json:"current"`
+	Updated                 string `json:"updated"`
+	Stars                   int    `json:"stars"`
+	OpenIssues              int    `json:"openIssues"`
+	Size                    int64  `json:"size"`
+	HSize                   string `json:"hSize"`
+	InstallSize             int64  `json:"installSize"`
+	HInstallSize            string `json:"hInstallSize"`
+	HInstallDate            string `json:"hInstallDate"`
+	HUpdated                string `json:"hUpdated"`
+	Downloads               int    `json:"downloads"`
+	DisallowInstall         bool   `json:"disallowInstall"`
+	DisallowUpdate          bool   `json:"disallowUpdate"`
+	UpdateRequiredMinAppVer string `json:"updateRequiredMinAppVer"`
 
 	Incompatible bool `json:"incompatible"`
 }
@@ -587,7 +590,7 @@ func getStageIndex(pkgType string) (ret *StageIndex, err error) {
 	defer stageIndexLock.Unlock()
 
 	now := time.Now().Unix()
-	if 3600 >= now-stageIndexCacheTime && nil != cachedStageIndex[pkgType] {
+	if util.RhyCacheDuration >= now-stageIndexCacheTime && nil != cachedStageIndex[pkgType] {
 		ret = cachedStageIndex[pkgType]
 		return
 	}
@@ -1111,7 +1114,7 @@ func getBazaarIndex() map[string]*bazaarPackage {
 // Add marketplace package config item `minAppVersion` https://github.com/siyuan-note/siyuan/issues/8330
 const defaultMinAppVersion = "2.9.0"
 
-func disallowDisplayBazaarPackage(pkg *Package) bool {
+func disallowInstallBazaarPackage(pkg *Package) bool {
 	if "" == pkg.MinAppVersion {
 		pkg.MinAppVersion = defaultMinAppVersion
 	}

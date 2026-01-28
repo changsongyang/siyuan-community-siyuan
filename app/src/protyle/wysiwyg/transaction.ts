@@ -13,7 +13,7 @@ import {getAllModels} from "../../layout/getAll";
 /// #endif
 import {avRender, refreshAV} from "../render/av/render";
 import {removeFoldHeading} from "../util/heading";
-import {genEmptyElement, genSBElement} from "../../block/util";
+import {cancelSB, genEmptyElement, genSBElement} from "../../block/util";
 import {hideElements} from "../ui/hideElements";
 import {reloadProtyle} from "../util/reload";
 import {countBlockWord} from "../../layout/status";
@@ -692,7 +692,7 @@ export const onTransaction = (protyle: IProtyle, operation: IOperation, isUndo: 
                 if (getContenteditableElement(rangeBlockElement)) {
                     range.insertNode(document.createElement("wbr"));
                 } else {
-                    getContenteditableElement(updateElements[0]).insertAdjacentHTML("afterbegin", "<wbr>");
+                    getContenteditableElement(updateElements[0])?.insertAdjacentHTML("afterbegin", "<wbr>");
                 }
             }
         }
@@ -935,11 +935,12 @@ export const onTransaction = (protyle: IProtyle, operation: IOperation, isUndo: 
     }
 };
 
-export const turnsIntoOneTransaction = (options: {
+export const turnsIntoOneTransaction = async (options: {
     protyle: IProtyle,
     selectsElement: Element[],
     type: TTurnIntoOne,
-    level?: TTurnIntoOneSub
+    level?: TTurnIntoOneSub,
+    unfocus?: boolean
 }) => {
     let parentElement: Element;
     const id = Lute.NewNodeID();
@@ -1048,8 +1049,16 @@ export const turnsIntoOneTransaction = (options: {
             blockRender(options.protyle, item);
         }
     });
+    if ((["Blocks2Blockquote", "Blocks2Callout"].includes(options.type) || options.type.endsWith("Ls")) &&
+        parentElement.parentElement.classList.contains("sb") && parentElement.parentElement.childElementCount === 2) {
+        const cancelOperations = await cancelSB(options.protyle, parentElement.parentElement);
+        doOperations.push(...cancelOperations.doOperations);
+        undoOperations.splice(0, 0, ...cancelOperations.undoOperations);
+    }
     transaction(options.protyle, doOperations, undoOperations);
-    focusBlock(options.protyle.wysiwyg.element.querySelector(`[data-node-id="${options.selectsElement[0].getAttribute("data-node-id")}"]`));
+    if (!options.unfocus) {
+        focusBlock(options.protyle.wysiwyg.element.querySelector(`[data-node-id="${options.selectsElement[0].getAttribute("data-node-id")}"]`));
+    }
     hideElements(["gutter"], options.protyle);
 };
 
@@ -1057,7 +1066,7 @@ const removeUnfoldRepeatBlock = (html: string, protyle: IProtyle) => {
     const temp = document.createElement("template");
     temp.innerHTML = html;
     Array.from(temp.content.children).forEach(item => {
-        protyle.wysiwyg.element.querySelector(`:scope > [data-node-id="${item.getAttribute("data-node-id")}"]`)?.remove();
+        protyle.wysiwyg.element.querySelector(`[data-node-id="${item.getAttribute("data-node-id")}"]`)?.remove();
     });
 };
 
@@ -1121,7 +1130,7 @@ export const turnsIntoTransaction = (options: {
         const id = item.getAttribute("data-node-id");
 
         const tempElement = document.createElement("template");
-        if (!options.isContinue) {
+        if (!options.isContinue || options.level) {
             // @ts-ignore
             let newHTML = options.protyle.lute[options.type](item.outerHTML, options.level);
             tempElement.innerHTML = newHTML;

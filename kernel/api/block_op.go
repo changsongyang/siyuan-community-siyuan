@@ -29,6 +29,7 @@ import (
 	"github.com/siyuan-community/siyuan/kernel/model"
 	"github.com/siyuan-community/siyuan/kernel/treenode"
 	"github.com/siyuan-community/siyuan/kernel/util"
+	"github.com/siyuan-note/logging"
 )
 
 func moveOutlineHeading(c *gin.Context) {
@@ -701,7 +702,13 @@ func updateBlock(c *gin.Context) {
 			tree.Root.FirstChild.Unlink()                          // 删除列表
 			tree.Root.FirstChild.Unlink()                          // 继续删除列表 IAL
 		}
-		tree.Root.FirstChild.SetIALAttr("id", id)
+
+		if nil != tree.Root.FirstChild {
+			tree.Root.FirstChild.SetIALAttr("id", id)
+		} else {
+			logging.LogWarnf("tree root has no child node, append empty paragraph node")
+			tree.Root.AppendChild(treenode.NewParagraph(id))
+		}
 
 		data = luteEngine.Tree2BlockDOM(tree, luteEngine.RenderOptions, luteEngine.ParseOptions)
 		transactions = []*model.Transaction{

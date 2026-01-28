@@ -17,7 +17,9 @@
 package proxy
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -35,6 +37,7 @@ var (
 	Port = "0"
 
 	listener  net.Listener
+	server    *http.Server
 	transport = &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
@@ -50,7 +53,6 @@ func InitPublishService() (uint16, error) {
 
 	if listener != nil {
 		if !model.Conf.Publish.Enable {
-			// 关闭发布服务
 			closePublishListener()
 			return 0, nil
 		}
@@ -58,12 +60,7 @@ func InitPublishService() (uint16, error) {
 		if port, err := util.ParsePort(Port); err != nil {
 			return 0, err
 		} else if port != model.Conf.Publish.Port {
-			// 关闭原端口的发布服务
-			if err = closePublishListener(); err != nil {
-				return 0, err
-			}
-
-			// 重新启动新端口的发布服务
+			closePublishListener()
 			initPublishService()
 		}
 	} else {
@@ -77,15 +74,13 @@ func InitPublishService() (uint16, error) {
 	return util.ParsePort(Port)
 }
 
-func initPublishService() (err error) {
-	if err = initPublishListener(); err == nil {
+func initPublishService() {
+	if err := initPublishListener(); err == nil {
 		go startPublishReverseProxyService()
 	}
-	return
 }
 
 func initPublishListener() (err error) {
-	// Start new listener
 	listener, err = net.Listen("tcp", fmt.Sprintf("%s:%d", Host, model.Conf.Publish.Port))
 	if err != nil {
 		logging.LogErrorf("start listener failed: %s", err)
@@ -100,32 +95,49 @@ func initPublishListener() (err error) {
 	return
 }
 
-func closePublishListener() (err error) {
-	listener_ := listener
-	listener = nil
-	if err = listener_.Close(); err != nil {
-		logging.LogErrorf("close listener %s failed: %s", listener_.Addr().String(), err)
-		listener = listener_
+func closePublishListener() {
+	if server == nil {
+		return
 	}
-	return
+
+	// 关闭所有发布服务的 WebSocket 连接
+	util.ClosePublishServiceSessions()
+
+	if err := server.Shutdown(context.Background()); err != nil {
+		logging.LogErrorf("shutdown server failed: %s", err)
+	}
+
+	if err := server.Close(); err != nil {
+		logging.LogErrorf("close server failed: %s", err)
+	}
+	server, listener = nil, nil
 }
 
 func startPublishReverseProxyService() {
 	logging.LogInfof("publish service [%s:%s] is running", Host, Port)
+
+	server = &http.Server{
+		Handler: &httputil.ReverseProxy{
+			Rewrite:   rewrite,
+			Transport: transport,
+		},
+	}
+
 	// 服务进行时一直阻塞
 	if util.TLSKernel {
-		if err := http.ServeTLS(listener, proxy, util.TLSCertFile, util.TLSKeyFile); nil != err {
+		if err := server.ServeTLS(listener, util.TLSCertFile, util.TLSKeyFile); nil != err {
 			if listener != nil {
 				logging.LogErrorf("boot publish service with SSL/TLS failed: %s", err)
 			}
 		}
 	} else {
-		if err := http.Serve(listener, proxy); nil != err {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			if listener != nil {
 				logging.LogErrorf("boot publish service failed: %s", err)
 			}
 		}
 	}
+
 	logging.LogInfof("publish service [%s:%s] is stopped", Host, Port)
 }
 
@@ -149,10 +161,10 @@ func (PublishServiceTransport) RoundTrip(request *http.Request) (response *http.
 					request.Header.Set(model.XAuthTokenKey, account.Token)
 					response, err = http.DefaultTransport.RoundTrip(request)
 					return
-				} else {
-					// Invalid account, remove session
-					model.DeleteSession(sessionID)
 				}
+
+				// Invalid account, remove session
+				model.DeleteSession(sessionID)
 			}
 		}
 
@@ -178,27 +190,26 @@ func (PublishServiceTransport) RoundTrip(request *http.Request) (response *http.
 				Close:         false,
 				ContentLength: -1,
 			}, nil
-		} else {
-			// set session cookie
-			sessionID := model.GetNewSessionID()
-			cookie := &http.Cookie{
-				Name:     model.SessionIdCookieName,
-				Value:    sessionID,
-				Path:     "/",
-				HttpOnly: true,
-			}
-			model.AddSession(sessionID, username)
-
-			// set JWT
-			request.Header.Set(model.XAuthTokenKey, account.Token)
-			response, err = http.DefaultTransport.RoundTrip(request)
-
-			response.Header.Add("Set-Cookie", cookie.String())
-			return
 		}
-	} else {
-		request.Header.Set(model.XAuthTokenKey, model.GetBasicAuthAccount("").Token)
+
+		// set session cookie
+		sessionID := model.GetNewSessionID()
+		cookie := &http.Cookie{
+			Name:     model.SessionIdCookieName,
+			Value:    sessionID,
+			Path:     "/",
+			HttpOnly: true,
+		}
+		model.AddSession(sessionID, username)
+
+		// set JWT
+		request.Header.Set(model.XAuthTokenKey, account.Token)
 		response, err = http.DefaultTransport.RoundTrip(request)
+		response.Header.Add("Set-Cookie", cookie.String())
 		return
 	}
+
+	request.Header.Set(model.XAuthTokenKey, model.GetBasicAuthAccount("").Token)
+	response, err = http.DefaultTransport.RoundTrip(request)
+	return
 }

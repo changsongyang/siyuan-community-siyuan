@@ -102,10 +102,9 @@ func Plugins(frontend string) (plugins []*Plugin) {
 			return
 		}
 
-		if disallowDisplayBazaarPackage(plugin.Package) {
-			return
-		}
-
+		plugin.DisallowInstall = disallowInstallBazaarPackage(plugin.Package)
+		plugin.DisallowUpdate = disallowInstallBazaarPackage(plugin.Package)
+		plugin.UpdateRequiredMinAppVer = plugin.MinAppVersion
 		plugin.Incompatible = isIncompatiblePlugin(plugin, frontend)
 
 		plugin.URL = strings.TrimSuffix(plugin.URL, "/")
@@ -154,7 +153,7 @@ func Plugins(frontend string) (plugins []*Plugin) {
 	return
 }
 
-func ParseInstalledPlugin(name, frontend string) (found bool, displayName string, incompatible, disabledInPublish bool) {
+func ParseInstalledPlugin(name, frontend string) (found bool, displayName string, incompatible, disabledInPublish, disallowInstall bool) {
 	pluginsPath := filepath.Join(util.DataDir, "plugins")
 	if !util.IsPathRegularDirOrSymlinkDir(pluginsPath) {
 		return
@@ -184,11 +183,12 @@ func ParseInstalledPlugin(name, frontend string) (found bool, displayName string
 		displayName = GetPreferredName(plugin.Package)
 		incompatible = isIncompatiblePlugin(plugin, frontend)
 		disabledInPublish = plugin.DisabledInPublish
+		disallowInstall = disallowInstallBazaarPackage(plugin.Package)
 	}
 	return
 }
 
-func InstalledPlugins(frontend string, checkUpdate bool) (ret []*Plugin) {
+func InstalledPlugins(frontend string) (ret []*Plugin) {
 	ret = []*Plugin{}
 
 	pluginsPath := filepath.Join(util.DataDir, "plugins")
@@ -202,10 +202,7 @@ func InstalledPlugins(frontend string, checkUpdate bool) (ret []*Plugin) {
 		return
 	}
 
-	var bazaarPlugins []*Plugin
-	if checkUpdate {
-		bazaarPlugins = Plugins(frontend)
-	}
+	bazaarPlugins := Plugins(frontend)
 
 	for _, pluginDir := range pluginDirs {
 		if !util.IsDirRegularOrSymlink(pluginDir) {
@@ -216,6 +213,12 @@ func InstalledPlugins(frontend string, checkUpdate bool) (ret []*Plugin) {
 		plugin, parseErr := PluginJSON(dirName)
 		if nil != parseErr || nil == plugin {
 			continue
+		}
+
+		plugin.DisallowInstall = disallowInstallBazaarPackage(plugin.Package)
+		if bazaarPkg := getBazaarPlugin(plugin.Name, bazaarPlugins); nil != bazaarPkg {
+			plugin.DisallowUpdate = disallowInstallBazaarPackage(bazaarPkg.Package)
+			plugin.UpdateRequiredMinAppVer = bazaarPkg.MinAppVersion
 		}
 
 		installPath := filepath.Join(util.DataDir, "plugins", dirName)
@@ -247,6 +250,15 @@ func InstalledPlugins(frontend string, checkUpdate bool) (ret []*Plugin) {
 		ret = append(ret, plugin)
 	}
 	return
+}
+
+func getBazaarPlugin(name string, plugins []*Plugin) *Plugin {
+	for _, p := range plugins {
+		if p.Name == name {
+			return p
+		}
+	}
+	return nil
 }
 
 func InstallPlugin(repoURL, repoHash, installPath string, systemID string) error {

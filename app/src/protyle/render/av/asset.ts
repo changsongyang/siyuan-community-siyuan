@@ -21,7 +21,9 @@ import {renameAsset} from "../../../editor/rename";
 import * as dayjs from "dayjs";
 import {getColId} from "./col";
 import {getFieldIdByCellElement} from "./row";
-import {getCompressURL, removeCompressURL} from "../../../util/image";
+import {base64ToURL, getCompressURL, removeCompressURL} from "../../../util/image";
+import {confirmDialog} from "../../../dialog/confirmDialog";
+import {filesize} from "filesize";
 
 export const bindAssetEvent = (options: {
     protyle: IProtyle,
@@ -199,11 +201,17 @@ export const editAssetItem = (options: {
 }) => {
     const linkAddress = removeCompressURL(options.content);
     const type = options.type as "image" | "file";
-    const menu = new Menu(Constants.MENU_AV_ASSET_EDIT, () => {
-        if ((!textElements[1] && textElements[0].value === linkAddress) ||
-            (textElements[1] && textElements[0].value === linkAddress && textElements[1].value === options.name)) {
+    const menu = new Menu(Constants.MENU_AV_ASSET_EDIT, async () => {
+        let currentLink = textElements[0].value;
+        if ((!textElements[1] && currentLink === linkAddress) ||
+            (textElements[1] && currentLink === linkAddress && textElements[1].value === options.name)) {
             return;
         }
+        if (type === "image" && currentLink.startsWith("data:image/")) {
+            const base64Src = await base64ToURL([currentLink]);
+            currentLink = base64Src[0];
+        }
+
         updateAssetCell({
             protyle: options.protyle,
             cellElements: options.cellElements,
@@ -211,7 +219,7 @@ export const editAssetItem = (options: {
             updateValue: {
                 index: options.index,
                 value: {
-                    content: textElements[0].value,
+                    content: currentLink,
                     name: textElements[1] ? textElements[1].value : "",
                     type
                 }
@@ -420,40 +428,51 @@ ${window.siyuan.languages.title}
     menu.element.querySelector("textarea").focus();
 };
 
-export const dragUpload = (files: string[], protyle: IProtyle, cellElement: HTMLElement) => {
-    const msgId = showMessage(window.siyuan.languages.uploading, 0);
-    fetchPost("/api/asset/insertLocalAssets", {
-        assetPaths: files,
-        isUpload: true,
-        id: protyle.block.rootID
-    }, (response) => {
-        const blockElement = hasClosestBlock(cellElement);
-        if (blockElement) {
-            hideMessage(msgId);
-            const addValue: IAVCellAssetValue[] = [];
-            Object.keys(response.data.succMap).forEach(key => {
-                const type = pathPosix().extname(key).toLowerCase();
-                const name = key.substring(0, key.length - type.length);
-                if (Constants.SIYUAN_ASSETS_IMAGE.includes(type)) {
-                    addValue.push({
-                        type: "image",
-                        name,
-                        content: response.data.succMap[key],
-                    });
-                } else {
-                    addValue.push({
-                        type: "file",
-                        name,
-                        content: response.data.succMap[key],
-                    });
-                }
-            });
-            updateAssetCell({
-                protyle,
-                blockElement,
-                cellElements: [cellElement],
-                addValue
-            });
+export const dragUpload = (files: ILocalFiles[], protyle: IProtyle, cellElement: HTMLElement) => {
+    let msg = "";
+    const assetPaths: string[] = [];
+    files.forEach(item => {
+        if (item.size && Constants.SIZE_UPLOAD_TIP_SIZE <= item.size) {
+            msg += window.siyuan.languages.uploadFileTooLarge.replace("${x}", item.path).replace("${y}", filesize(item.size, {standard: "iec"})) + "<br>";
         }
+        assetPaths.push(item.path);
+    });
+
+    confirmDialog(msg ? window.siyuan.languages.upload : "", msg, () => {
+        const msgId = showMessage(window.siyuan.languages.uploading, 0);
+        fetchPost("/api/asset/insertLocalAssets", {
+            assetPaths,
+            isUpload: true,
+            id: protyle.block.rootID
+        }, (response) => {
+            const blockElement = hasClosestBlock(cellElement);
+            if (blockElement) {
+                hideMessage(msgId);
+                const addValue: IAVCellAssetValue[] = [];
+                Object.keys(response.data.succMap).forEach(key => {
+                    const type = pathPosix().extname(key).toLowerCase();
+                    const name = key.substring(0, key.length - type.length);
+                    if (Constants.SIYUAN_ASSETS_IMAGE.includes(type)) {
+                        addValue.push({
+                            type: "image",
+                            name,
+                            content: response.data.succMap[key],
+                        });
+                    } else {
+                        addValue.push({
+                            type: "file",
+                            name,
+                            content: response.data.succMap[key],
+                        });
+                    }
+                });
+                updateAssetCell({
+                    protyle,
+                    blockElement,
+                    cellElements: [cellElement],
+                    addValue
+                });
+            }
+        });
     });
 };

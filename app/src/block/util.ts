@@ -132,7 +132,7 @@ export const insertEmptyBlock = (protyle: IProtyle, position: InsertPosition, id
             // https://github.com/siyuan-note/siyuan/issues/14720#issuecomment-2840665326
             if (blockElement.classList.contains("list")) {
                 blockElement = hasClosestByClassName(range.startContainer, "li") as HTMLElement;
-            } else if (blockElement.classList.contains("bq")) {
+            } else if (blockElement.classList.contains("bq") || blockElement.classList.contains("callout")) {
                 blockElement = hasClosestBlock(range.startContainer) as HTMLElement;
             }
         }
@@ -191,7 +191,8 @@ export const insertEmptyBlock = (protyle: IProtyle, position: InsertPosition, id
             protyle,
             selectsElement: position === "afterend" ? [blockElement, blockElement.nextElementSibling] : [blockElement.previousElementSibling, blockElement],
             type: "BlocksMergeSuperBlock",
-            level: "row"
+            level: "row",
+            unfocus: true,
         });
     }
     focusByWbr(protyle.wysiwyg.element, range);
